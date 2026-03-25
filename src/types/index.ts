@@ -36,3 +36,15 @@ export interface VoiceResultDto {
   searchQuery: string | null
   message: string | null
 }
+
+export interface TaskRecommendationItemDto {
+  taskId: string
+  title: string
+  order: number
+  reason: string
+}
+
+export interface TaskRecommendationsDto {
+  recommendations: TaskRecommendationItemDto[]
+  summary: string
+}

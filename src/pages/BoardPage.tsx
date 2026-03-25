@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { boardsApi } from '../api/boardsApi'
 import { tasksApi } from '../api/tasksApi'
+import { aiApi } from '../api/aiApi'
 import type { TaskItemDto, TaskPriority } from '../types'
 
 const priorityLabel: Record<TaskPriority, string> = {
@@ -47,16 +48,23 @@ export default function BoardPage() {
   const [showCreate, setShowCreate] = useState(false)
   const [editTask, setEditTask] = useState<TaskItemDto | null>(null)
   const [detailTask, setDetailTask] = useState<TaskItemDto | null>(null)
+  const [showRecommendations, setShowRecommendations] = useState(false)
 
   const [form, setForm] = useState<TaskForm>({
     title: '', description: '', priority: 'Medium', deadline: ''
   })
 
   const { data: taskDetail, isLoading: isDetailLoading } = useQuery({
-  queryKey: ['task', detailTask?.id],
-  queryFn: () => tasksApi.getById(detailTask!.id).then((r) => r.data),
-  enabled: !!detailTask,
-})
+    queryKey: ['task', detailTask?.id],
+    queryFn: () => tasksApi.getById(detailTask!.id).then((r) => r.data),
+    enabled: !!detailTask,
+  })
+
+  const { data: recommendations, isLoading: isRecsLoading, refetch: fetchRecs } = useQuery({
+    queryKey: ['recommendations', id],
+    queryFn: () => aiApi.getRecommendations(id!).then((r) => r.data),
+    enabled: false,
+  })
 
   // Голосовой ввод
   const [voiceStatus, setVoiceStatus] = useState<VoiceStatus>('idle')
@@ -132,6 +140,7 @@ export default function BoardPage() {
 
   const openEdit = (task: TaskItemDto) => {
     setEditTask(task)
+    setShowCreate(false)
     setForm({
       title: task.title,
       description: task.description ?? '',
@@ -140,7 +149,6 @@ export default function BoardPage() {
     })
   }
 
-  // Голосовой ввод
   const startListening = () => {
     const SpeechRecognition =
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
@@ -159,36 +167,37 @@ export default function BoardPage() {
       setVoiceStatus('listening')
       setVoiceMessage(null)
     }
+
     recognition.onresult = async (event: any) => {
-  const transcript = event.results[0][0].transcript
-  setVoiceStatus('processing')
-  setVoiceMessage(`Распознано: "${transcript}"`)
+      const transcript = event.results[0][0].transcript
+      setVoiceStatus('processing')
+      setVoiceMessage(`Распознано: "${transcript}"`)
 
-  try {
-    const { data } = await tasksApi.processVoice(transcript, id!)
-    setVoiceMessage(data.message ?? 'Готово')
+      try {
+        const { data } = await tasksApi.processVoice(transcript, id!)
+        setVoiceMessage(data.message ?? 'Готово')
 
-    if (data.intent === 'SearchTasks' && data.searchQuery) {
-      setSearchTerm(data.searchQuery)
+        if (data.intent === 'SearchTasks' && data.searchQuery) {
+          setSearchTerm(data.searchQuery)
+          const { data: found } = await tasksApi.search(id!, data.searchQuery)
+          if (found.length === 1) {
+            setDetailTask(found[0])
+          }
+        }
 
-      // ищем задачи по запросу
-      const { data: found } = await tasksApi.search(id!, data.searchQuery)
+        if (data.intent === 'GetRecommendations') {
+          fetchRecs()
+          setShowRecommendations(true)
+        }
 
-      if (found.length === 1) {
-        // ровно одна — открываем детали
-        setDetailTask(found[0])
+        queryClient.invalidateQueries({ queryKey: ['tasks', id] })
+        queryClient.invalidateQueries({ queryKey: ['boards'] })
+      } catch {
+        setVoiceMessage('Ошибка обработки команды')
+      } finally {
+        setVoiceStatus('idle')
       }
-      // если несколько — просто фильтр применился
     }
-
-    queryClient.invalidateQueries({ queryKey: ['tasks', id] })
-    queryClient.invalidateQueries({ queryKey: ['boards'] })
-  } catch {
-    setVoiceMessage('Ошибка обработки команды')
-  } finally {
-    setVoiceStatus('idle')
-  }
-}
 
     recognition.onend = () => {
       if (voiceStatus === 'listening') setVoiceStatus('idle')
@@ -231,7 +240,6 @@ export default function BoardPage() {
       <main className="max-w-6xl mx-auto px-6 py-8">
         {/* Toolbar */}
         <div className="flex flex-wrap items-center gap-3 mb-6">
-          {/* Search */}
           <input
             type="text"
             placeholder="Поиск задач..."
@@ -240,7 +248,6 @@ export default function BoardPage() {
             className="flex-1 min-w-48 bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-2 text-white placeholder-zinc-600 focus:outline-none focus:border-indigo-500 transition-colors text-sm"
           />
 
-          {/* Voice button */}
           <button
             onClick={voiceStatus === 'listening' ? stopListening : startListening}
             disabled={voiceStatus === 'processing'}
@@ -260,7 +267,13 @@ export default function BoardPage() {
               : 'Голосовая команда'}
           </button>
 
-          {/* Create button */}
+          <button
+            onClick={() => { fetchRecs(); setShowRecommendations(true) }}
+            className="bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-sm font-semibold px-4 py-2 rounded-lg transition-colors"
+          >
+            ✨ Рекомендации
+          </button>
+
           <button
             onClick={() => {
               setEditTask(null)
@@ -370,11 +383,11 @@ export default function BoardPage() {
                     >
                       <div className="flex items-start justify-between gap-2 mb-2">
                         <h4
-                            onClick={() => setDetailTask(task)}
-                            className="font-medium text-sm text-white leading-snug cursor-pointer hover:text-indigo-400 transition-colors"
-                          >
-                            {task.title}
-                          </h4>
+                          onClick={() => setDetailTask(task)}
+                          className="font-medium text-sm text-white leading-snug cursor-pointer hover:text-indigo-400 transition-colors"
+                        >
+                          {task.title}
+                        </h4>
                         <div className="flex gap-1 shrink-0">
                           {task.isVoiceCreated && (
                             <span className="text-xs text-indigo-400" title="Создано голосом">🎤</span>
@@ -430,108 +443,164 @@ export default function BoardPage() {
             ))}
           </div>
         )}
+
+        {/* Task Detail Modal */}
         {detailTask && (
-  <div
-    className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 px-4"
-    onClick={() => setDetailTask(null)}
-  >
-    <div
-      className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 w-full max-w-lg"
-      onClick={(e) => e.stopPropagation()}
-    >
-      {isDetailLoading ? (
-        <div className="text-zinc-500 text-center py-8">Загружаем...</div>
-      ) : taskDetail ? (
-        <>
-          <div className="flex items-start justify-between mb-4">
-            <h2 className="text-lg font-bold text-white pr-4">{taskDetail.title}</h2>
-            <button
-              onClick={() => setDetailTask(null)}
-              className="text-zinc-500 hover:text-white transition-colors shrink-0"
+          <div
+            className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 px-4"
+            onClick={() => setDetailTask(null)}
+          >
+            <div
+              className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 w-full max-w-lg"
+              onClick={(e) => e.stopPropagation()}
             >
-              ✕
-            </button>
+              {isDetailLoading ? (
+                <div className="text-zinc-500 text-center py-8">Загружаем...</div>
+              ) : taskDetail ? (
+                <>
+                  <div className="flex items-start justify-between mb-4">
+                    <h2 className="text-lg font-bold text-white pr-4">{taskDetail.title}</h2>
+                    <button
+                      onClick={() => setDetailTask(null)}
+                      className="text-zinc-500 hover:text-white transition-colors shrink-0"
+                    >
+                      ✕
+                    </button>
+                  </div>
+
+                  <div className="space-y-3">
+                    {taskDetail.description && (
+                      <div>
+                        <p className="text-xs text-zinc-500 mb-1">Описание</p>
+                        <p className="text-sm text-zinc-300">{taskDetail.description}</p>
+                      </div>
+                    )}
+
+                    <div className="flex gap-4">
+                      <div>
+                        <p className="text-xs text-zinc-500 mb-1">Статус</p>
+                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColor[taskDetail.status]}`}>
+                          {statusLabel[taskDetail.status]}
+                        </span>
+                      </div>
+                      <div>
+                        <p className="text-xs text-zinc-500 mb-1">Приоритет</p>
+                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${priorityColor[taskDetail.priority]}`}>
+                          {priorityLabel[taskDetail.priority]}
+                        </span>
+                      </div>
+                      {taskDetail.isVoiceCreated && (
+                        <div>
+                          <p className="text-xs text-zinc-500 mb-1">Источник</p>
+                          <span className="text-xs text-indigo-400">🎤 Голосом</span>
+                        </div>
+                      )}
+                    </div>
+
+                    {taskDetail.deadline && (
+                      <div>
+                        <p className="text-xs text-zinc-500 mb-1">Дедлайн</p>
+                        <p className="text-sm text-zinc-300">
+                          {new Date(taskDetail.deadline).toLocaleDateString('ru-RU', {
+                            day: 'numeric', month: 'long', year: 'numeric'
+                          })}
+                        </p>
+                      </div>
+                    )}
+
+                    <div className="flex gap-4">
+                      <div>
+                        <p className="text-xs text-zinc-500 mb-1">Создано</p>
+                        <p className="text-sm text-zinc-400">
+                          {new Date(taskDetail.createdAt).toLocaleDateString('ru-RU')}
+                        </p>
+                      </div>
+                      {taskDetail.updatedAt && (
+                        <div>
+                          <p className="text-xs text-zinc-500 mb-1">Обновлено</p>
+                          <p className="text-sm text-zinc-400">
+                            {new Date(taskDetail.updatedAt).toLocaleDateString('ru-RU')}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2 mt-6">
+                    <button
+                      onClick={() => { openEdit(taskDetail); setDetailTask(null) }}
+                      className="flex-1 bg-zinc-800 hover:bg-zinc-700 text-white text-sm font-semibold py-2 rounded-lg transition-colors"
+                    >
+                      ✎ Редактировать
+                    </button>
+                    {taskDetail.status !== 'Done' && (
+                      <button
+                        onClick={() => { completeMutation.mutate(taskDetail.id); setDetailTask(null) }}
+                        className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold py-2 rounded-lg transition-colors"
+                      >
+                        ✓ Выполнено
+                      </button>
+                    )}
+                  </div>
+                </>
+              ) : null}
+            </div>
           </div>
+        )}
 
-          <div className="space-y-3">
-            {taskDetail.description && (
-              <div>
-                <p className="text-xs text-zinc-500 mb-1">Описание</p>
-                <p className="text-sm text-zinc-300">{taskDetail.description}</p>
+        {/* Recommendations Modal */}
+        {showRecommendations && (
+          <div
+            className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 px-4"
+            onClick={() => setShowRecommendations(false)}
+          >
+            <div
+              className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 w-full max-w-lg max-h-[80vh] overflow-y-auto"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-lg font-bold text-white">✨ AI Рекомендации</h2>
+                <button
+                  onClick={() => setShowRecommendations(false)}
+                  className="text-zinc-500 hover:text-white transition-colors"
+                >
+                  ✕
+                </button>
               </div>
-            )}
 
-            <div className="flex gap-4">
-              <div>
-                <p className="text-xs text-zinc-500 mb-1">Статус</p>
-                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColor[taskDetail.status]}`}>
-                  {statusLabel[taskDetail.status]}
-                </span>
-              </div>
-              <div>
-                <p className="text-xs text-zinc-500 mb-1">Приоритет</p>
-                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${priorityColor[taskDetail.priority]}`}>
-                  {priorityLabel[taskDetail.priority]}
-                </span>
-              </div>
-              {taskDetail.isVoiceCreated && (
-                <div>
-                  <p className="text-xs text-zinc-500 mb-1">Источник</p>
-                  <span className="text-xs text-indigo-400">🎤 Голосом</span>
-                </div>
+              {isRecsLoading ? (
+                <div className="text-zinc-500 text-center py-8">AI анализирует задачи...</div>
+              ) : recommendations ? (
+                <>
+                  {recommendations.summary && (
+                    <div className="mb-4 px-4 py-3 bg-indigo-500/10 border border-indigo-500/20 rounded-lg">
+                      <p className="text-indigo-300 text-sm">{recommendations.summary}</p>
+                    </div>
+                  )}
+
+                  <div className="space-y-3">
+                    {recommendations.recommendations.map((rec, index) => (
+                      <div
+                        key={rec.taskId}
+                        className="bg-zinc-800 rounded-xl p-4 flex gap-4 items-start"
+                      >
+                        <span className="text-2xl font-black text-zinc-600 shrink-0">
+                          {index + 1}
+                        </span>
+                        <div>
+                          <p className="text-white font-medium text-sm mb-1">{rec.title}</p>
+                          <p className="text-zinc-500 text-xs">{rec.reason}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <div className="text-zinc-600 text-center py-8">Нет данных</div>
               )}
             </div>
-
-            {taskDetail.deadline && (
-              <div>
-                <p className="text-xs text-zinc-500 mb-1">Дедлайн</p>
-                <p className="text-sm text-zinc-300">
-                  {new Date(taskDetail.deadline).toLocaleDateString('ru-RU', {
-                    day: 'numeric', month: 'long', year: 'numeric'
-                  })}
-                </p>
-              </div>
-            )}
-
-            <div className="flex gap-4">
-              <div>
-                <p className="text-xs text-zinc-500 mb-1">Создано</p>
-                <p className="text-sm text-zinc-400">
-                  {new Date(taskDetail.createdAt).toLocaleDateString('ru-RU')}
-                </p>
-              </div>
-              {taskDetail.updatedAt && (
-                <div>
-                  <p className="text-xs text-zinc-500 mb-1">Обновлено</p>
-                  <p className="text-sm text-zinc-400">
-                    {new Date(taskDetail.updatedAt).toLocaleDateString('ru-RU')}
-                  </p>
-                </div>
-              )}
-            </div>
           </div>
-
-          <div className="flex gap-2 mt-6">
-            <button
-              onClick={() => { openEdit(taskDetail); setDetailTask(null) }}
-              className="flex-1 bg-zinc-800 hover:bg-zinc-700 text-white text-sm font-semibold py-2 rounded-lg transition-colors"
-            >
-              ✎ Редактировать
-            </button>
-            {taskDetail.status !== 'Done' && (
-              <button
-                onClick={() => { completeMutation.mutate(taskDetail.id); setDetailTask(null) }}
-                className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold py-2 rounded-lg transition-colors"
-              >
-                ✓ Выполнено
-              </button>
-            )}
-          </div>
-        </>
-      ) : null}
-    </div>
-  </div>
-)}
+        )}
       </main>
     </div>
   )
