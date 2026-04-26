@@ -47,4 +47,8 @@ create: (data: {
   delete: (taskId: string) =>
     api.delete(`/taskitems/deleteTask/${taskId}`),
   
+  changeStatus: (taskId: string, status: string) =>
+  api.patch(`/taskitems/changeStatus/${taskId}`, JSON.stringify(status), {
+    headers: { 'Content-Type': 'application/json' }
+  }),
 }

@@ -5,6 +5,8 @@ import { boardsApi } from '../api/boardsApi'
 import { tasksApi } from '../api/tasksApi'
 import { aiApi } from '../api/aiApi'
 import type { TaskItemDto, TaskPriority } from '../types'
+import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd'
+import type { DropResult } from '@hello-pangea/dnd'
 
 const priorityLabel: Record<TaskPriority, string> = {
   Low: 'Низкий',
@@ -66,7 +68,6 @@ export default function BoardPage() {
     enabled: false,
   })
 
-  // Голосовой ввод
   const [voiceStatus, setVoiceStatus] = useState<VoiceStatus>('idle')
   const [voiceMessage, setVoiceMessage] = useState<string | null>(null)
   const recognitionRef = useRef<any>(null)
@@ -114,6 +115,22 @@ export default function BoardPage() {
       queryClient.invalidateQueries({ queryKey: ['boards'] })
     },
   })
+
+  // ← ВНУТРИ компонента
+  const changeStatusMutation = useMutation({
+    mutationFn: ({ taskId, status }: { taskId: string; status: string }) =>
+      tasksApi.changeStatus(taskId, status),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['tasks', id] }),
+  })
+
+  const handleDragEnd = (result: DropResult) => {
+    if (!result.destination) return
+    if (result.source.droppableId === result.destination.droppableId) return
+    changeStatusMutation.mutate({
+      taskId: result.draggableId,
+      status: result.destination.droppableId,
+    })
+  }
 
   const handleCreate = (e: React.FormEvent) => {
     e.preventDefault()
@@ -180,9 +197,7 @@ export default function BoardPage() {
         if (data.intent === 'SearchTasks' && data.searchQuery) {
           setSearchTerm(data.searchQuery)
           const { data: found } = await tasksApi.search(id!, data.searchQuery)
-          if (found.length === 1) {
-            setDetailTask(found[0])
-          }
+          if (found.length === 1) setDetailTask(found[0])
         }
 
         if (data.intent === 'GetRecommendations') {
@@ -223,22 +238,15 @@ export default function BoardPage() {
 
   return (
     <div className="min-h-screen bg-zinc-950 text-white">
-      {/* Header */}
       <header className="border-b border-zinc-800 px-6 py-4 flex items-center gap-4">
-        <button
-          onClick={() => navigate('/boards')}
-          className="text-zinc-500 hover:text-white transition-colors"
-        >
+        <button onClick={() => navigate('/boards')} className="text-zinc-500 hover:text-white transition-colors">
           ← Назад
         </button>
         <h1 className="text-xl font-bold">{board?.title ?? '...'}</h1>
-        {board?.description && (
-          <span className="text-zinc-600 text-sm">{board.description}</span>
-        )}
+        {board?.description && <span className="text-zinc-600 text-sm">{board.description}</span>}
       </header>
 
       <main className="max-w-6xl mx-auto px-6 py-8">
-        {/* Toolbar */}
         <div className="flex flex-wrap items-center gap-3 mb-6">
           <input
             type="text"
@@ -247,33 +255,26 @@ export default function BoardPage() {
             onChange={(e) => setSearchTerm(e.target.value)}
             className="flex-1 min-w-48 bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-2 text-white placeholder-zinc-600 focus:outline-none focus:border-indigo-500 transition-colors text-sm"
           />
-
           <button
             onClick={voiceStatus === 'listening' ? stopListening : startListening}
             disabled={voiceStatus === 'processing'}
             className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
-              voiceStatus === 'listening'
-                ? 'bg-red-500 hover:bg-red-400 text-white animate-pulse'
-                : voiceStatus === 'processing'
-                ? 'bg-zinc-700 text-zinc-400 cursor-wait'
-                : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-300'
+              voiceStatus === 'listening' ? 'bg-red-500 hover:bg-red-400 text-white animate-pulse'
+              : voiceStatus === 'processing' ? 'bg-zinc-700 text-zinc-400 cursor-wait'
+              : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-300'
             }`}
           >
             🎤{' '}
-            {voiceStatus === 'listening'
-              ? 'Слушаю...'
-              : voiceStatus === 'processing'
-              ? 'Обрабатываю...'
+            {voiceStatus === 'listening' ? 'Слушаю...'
+              : voiceStatus === 'processing' ? 'Обрабатываю...'
               : 'Голосовая команда'}
           </button>
-
           <button
             onClick={() => { fetchRecs(); setShowRecommendations(true) }}
             className="bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-sm font-semibold px-4 py-2 rounded-lg transition-colors"
           >
             ✨ Рекомендации
           </button>
-
           <button
             onClick={() => {
               setEditTask(null)
@@ -286,25 +287,16 @@ export default function BoardPage() {
           </button>
         </div>
 
-        {/* Voice message */}
         {voiceMessage && (
           <div className="mb-4 px-4 py-3 bg-indigo-500/10 border border-indigo-500/20 rounded-lg flex items-center justify-between">
             <span className="text-indigo-300 text-sm">🎤 {voiceMessage}</span>
-            <button
-              onClick={() => setVoiceMessage(null)}
-              className="text-zinc-500 hover:text-white text-xs transition-colors"
-            >
-              ✕
-            </button>
+            <button onClick={() => setVoiceMessage(null)} className="text-zinc-500 hover:text-white text-xs transition-colors">✕</button>
           </div>
         )}
 
-        {/* Create / Edit form */}
         {(showCreate || editTask) && (
           <div className="mb-8 bg-zinc-900 border border-zinc-800 rounded-2xl p-6">
-            <h3 className="text-lg font-semibold mb-4">
-              {editTask ? 'Редактировать задачу' : 'Новая задача'}
-            </h3>
+            <h3 className="text-lg font-semibold mb-4">{editTask ? 'Редактировать задачу' : 'Новая задача'}</h3>
             <form onSubmit={editTask ? handleUpdate : handleCreate} className="space-y-3">
               <input
                 type="text"
@@ -357,91 +349,101 @@ export default function BoardPage() {
           </div>
         )}
 
-        {/* Kanban columns */}
         {isLoading ? (
           <div className="text-zinc-500 text-center py-20">Загружаем задачи...</div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {[
-              { label: 'К выполнению', tasks: todoTasks, status: 'Todo' },
-              { label: 'В процессе', tasks: inProgressTasks, status: 'InProgress' },
-              { label: 'Выполнено', tasks: doneTasks, status: 'Done' },
-            ].map((col) => (
-              <div key={col.status}>
-                <div className="flex items-center gap-2 mb-4">
-                  <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${statusColor[col.status]}`}>
-                    {statusLabel[col.status]}
-                  </span>
-                  <span className="text-zinc-600 text-sm">{col.tasks.length}</span>
-                </div>
+          <DragDropContext onDragEnd={handleDragEnd}>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              {[
+                { tasks: todoTasks, status: 'Todo' },
+                { tasks: inProgressTasks, status: 'InProgress' },
+                { tasks: doneTasks, status: 'Done' },
+              ].map((col) => (
+                <div key={col.status}>
+                  <div className="flex items-center gap-2 mb-4">
+                    <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${statusColor[col.status]}`}>
+                      {statusLabel[col.status]}
+                    </span>
+                    <span className="text-zinc-600 text-sm">{col.tasks.length}</span>
+                  </div>
 
-                <div className="space-y-3">
-                  {col.tasks.map((task) => (
-                    <div
-                      key={task.id}
-                      className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 hover:border-zinc-700 transition-all"
-                    >
-                      <div className="flex items-start justify-between gap-2 mb-2">
-                        <h4
-                          onClick={() => setDetailTask(task)}
-                          className="font-medium text-sm text-white leading-snug cursor-pointer hover:text-indigo-400 transition-colors"
-                        >
-                          {task.title}
-                        </h4>
-                        <div className="flex gap-1 shrink-0">
-                          {task.isVoiceCreated && (
-                            <span className="text-xs text-indigo-400" title="Создано голосом">🎤</span>
-                          )}
-                          <button
-                            onClick={() => openEdit(task)}
-                            className="text-zinc-600 hover:text-white transition-colors text-xs"
-                          >
-                            ✎
-                          </button>
-                          <button
-                            onClick={() => deleteMutation.mutate(task.id)}
-                            className="text-zinc-600 hover:text-red-400 transition-colors text-xs"
-                          >
-                            ✕
-                          </button>
-                        </div>
-                      </div>
+                  <Droppable droppableId={col.status}>
+                    {(provided, snapshot) => (
+                      <div
+                        ref={provided.innerRef}
+                        {...provided.droppableProps}
+                        className={`space-y-3 min-h-24 rounded-xl transition-colors ${snapshot.isDraggingOver ? 'bg-zinc-800/50' : ''}`}
+                      >
+                        {col.tasks.map((task, index) => (
+                          <Draggable key={task.id} draggableId={task.id} index={index}>
+                            {(provided, snapshot) => (
+                              <div
+                                ref={provided.innerRef}
+                                {...provided.draggableProps}
+                                {...provided.dragHandleProps}
+                                className={`bg-zinc-900 border rounded-xl p-4 transition-all ${
+                                  snapshot.isDragging
+                                    ? 'border-indigo-500/50 shadow-lg shadow-indigo-500/10 rotate-1'
+                                    : 'border-zinc-800 hover:border-zinc-700'
+                                }`}
+                              >
+                                <div className="flex items-start justify-between gap-2 mb-2">
+                                  <h4
+                                    onClick={() => setDetailTask(task)}
+                                    className="font-medium text-sm text-white leading-snug cursor-pointer hover:text-indigo-400 transition-colors"
+                                  >
+                                    {task.title}
+                                  </h4>
+                                  <div className="flex gap-1 shrink-0">
+                                    {task.isVoiceCreated && (
+                                      <span className="text-xs text-indigo-400" title="Создано голосом">🎤</span>
+                                    )}
+                                    <button onClick={() => openEdit(task)} className="text-zinc-600 hover:text-white transition-colors text-xs">✎</button>
+                                    <button onClick={() => deleteMutation.mutate(task.id)} className="text-zinc-600 hover:text-red-400 transition-colors text-xs">✕</button>
+                                  </div>
+                                </div>
 
-                      {task.description && (
-                        <p className="text-zinc-500 text-xs mb-3 line-clamp-2">{task.description}</p>
-                      )}
+                                {task.description && (
+                                  <p className="text-zinc-500 text-xs mb-3 line-clamp-2">{task.description}</p>
+                                )}
 
-                      <div className="flex items-center justify-between">
-                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${priorityColor[task.priority]}`}>
-                          {priorityLabel[task.priority]}
-                        </span>
-                        {task.deadline && (
-                          <span className="text-zinc-600 text-xs">
-                            {new Date(task.deadline).toLocaleDateString('ru-RU')}
-                          </span>
+                                <div className="flex items-center justify-between">
+                                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${priorityColor[task.priority]}`}>
+                                    {priorityLabel[task.priority]}
+                                  </span>
+                                  {task.deadline && (
+                                    <span className="text-zinc-600 text-xs">
+                                      {new Date(task.deadline).toLocaleDateString('ru-RU')}
+                                    </span>
+                                  )}
+                                </div>
+
+                                {task.status !== 'Done' && (
+                                  <button
+                                    onClick={() => completeMutation.mutate(task.id)}
+                                    className="mt-3 w-full text-xs text-zinc-500 hover:text-green-400 border border-zinc-800 hover:border-green-400/30 rounded-lg py-1.5 transition-all"
+                                  >
+                                    ✓ Выполнено
+                                  </button>
+                                )}
+                              </div>
+                            )}
+                          </Draggable>
+                        ))}
+                        {provided.placeholder}
+
+                        {col.tasks.length === 0 && !snapshot.isDraggingOver && (
+                          <div className="border border-dashed border-zinc-800 rounded-xl p-6 text-center text-zinc-700 text-sm">
+                            Нет задач
+                          </div>
                         )}
                       </div>
-
-                      {task.status !== 'Done' && (
-                        <button
-                          onClick={() => completeMutation.mutate(task.id)}
-                          className="mt-3 w-full text-xs text-zinc-500 hover:text-green-400 border border-zinc-800 hover:border-green-400/30 rounded-lg py-1.5 transition-all"
-                        >
-                          ✓ Выполнено
-                        </button>
-                      )}
-                    </div>
-                  ))}
-
-                  {col.tasks.length === 0 && (
-                    <div className="border border-dashed border-zinc-800 rounded-xl p-6 text-center text-zinc-700 text-sm">
-                      Нет задач
-                    </div>
-                  )}
+                    )}
+                  </Droppable>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          </DragDropContext>
         )}
 
         {/* Task Detail Modal */}
@@ -450,22 +452,14 @@ export default function BoardPage() {
             className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 px-4"
             onClick={() => setDetailTask(null)}
           >
-            <div
-              className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 w-full max-w-lg"
-              onClick={(e) => e.stopPropagation()}
-            >
+            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 w-full max-w-lg" onClick={(e) => e.stopPropagation()}>
               {isDetailLoading ? (
                 <div className="text-zinc-500 text-center py-8">Загружаем...</div>
               ) : taskDetail ? (
                 <>
                   <div className="flex items-start justify-between mb-4">
                     <h2 className="text-lg font-bold text-white pr-4">{taskDetail.title}</h2>
-                    <button
-                      onClick={() => setDetailTask(null)}
-                      className="text-zinc-500 hover:text-white transition-colors shrink-0"
-                    >
-                      ✕
-                    </button>
+                    <button onClick={() => setDetailTask(null)} className="text-zinc-500 hover:text-white transition-colors shrink-0">✕</button>
                   </div>
 
                   <div className="space-y-3">
@@ -475,19 +469,14 @@ export default function BoardPage() {
                         <p className="text-sm text-zinc-300">{taskDetail.description}</p>
                       </div>
                     )}
-
                     <div className="flex gap-4">
                       <div>
                         <p className="text-xs text-zinc-500 mb-1">Статус</p>
-                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColor[taskDetail.status]}`}>
-                          {statusLabel[taskDetail.status]}
-                        </span>
+                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColor[taskDetail.status]}`}>{statusLabel[taskDetail.status]}</span>
                       </div>
                       <div>
                         <p className="text-xs text-zinc-500 mb-1">Приоритет</p>
-                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${priorityColor[taskDetail.priority]}`}>
-                          {priorityLabel[taskDetail.priority]}
-                        </span>
+                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${priorityColor[taskDetail.priority]}`}>{priorityLabel[taskDetail.priority]}</span>
                       </div>
                       {taskDetail.isVoiceCreated && (
                         <div>
@@ -496,31 +485,23 @@ export default function BoardPage() {
                         </div>
                       )}
                     </div>
-
                     {taskDetail.deadline && (
                       <div>
                         <p className="text-xs text-zinc-500 mb-1">Дедлайн</p>
                         <p className="text-sm text-zinc-300">
-                          {new Date(taskDetail.deadline).toLocaleDateString('ru-RU', {
-                            day: 'numeric', month: 'long', year: 'numeric'
-                          })}
+                          {new Date(taskDetail.deadline).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' })}
                         </p>
                       </div>
                     )}
-
                     <div className="flex gap-4">
                       <div>
                         <p className="text-xs text-zinc-500 mb-1">Создано</p>
-                        <p className="text-sm text-zinc-400">
-                          {new Date(taskDetail.createdAt).toLocaleDateString('ru-RU')}
-                        </p>
+                        <p className="text-sm text-zinc-400">{new Date(taskDetail.createdAt).toLocaleDateString('ru-RU')}</p>
                       </div>
                       {taskDetail.updatedAt && (
                         <div>
                           <p className="text-xs text-zinc-500 mb-1">Обновлено</p>
-                          <p className="text-sm text-zinc-400">
-                            {new Date(taskDetail.updatedAt).toLocaleDateString('ru-RU')}
-                          </p>
+                          <p className="text-sm text-zinc-400">{new Date(taskDetail.updatedAt).toLocaleDateString('ru-RU')}</p>
                         </div>
                       )}
                     </div>
@@ -560,12 +541,7 @@ export default function BoardPage() {
             >
               <div className="flex items-center justify-between mb-6">
                 <h2 className="text-lg font-bold text-white">✨ AI Рекомендации</h2>
-                <button
-                  onClick={() => setShowRecommendations(false)}
-                  className="text-zinc-500 hover:text-white transition-colors"
-                >
-                  ✕
-                </button>
+                <button onClick={() => setShowRecommendations(false)} className="text-zinc-500 hover:text-white transition-colors">✕</button>
               </div>
 
               {isRecsLoading ? (
@@ -577,16 +553,10 @@ export default function BoardPage() {
                       <p className="text-indigo-300 text-sm">{recommendations.summary}</p>
                     </div>
                   )}
-
                   <div className="space-y-3">
                     {recommendations.recommendations.map((rec, index) => (
-                      <div
-                        key={rec.taskId}
-                        className="bg-zinc-800 rounded-xl p-4 flex gap-4 items-start"
-                      >
-                        <span className="text-2xl font-black text-zinc-600 shrink-0">
-                          {index + 1}
-                        </span>
+                      <div key={rec.taskId} className="bg-zinc-800 rounded-xl p-4 flex gap-4 items-start">
+                        <span className="text-2xl font-black text-zinc-600 shrink-0">{index + 1}</span>
                         <div>
                           <p className="text-white font-medium text-sm mb-1">{rec.title}</p>
                           <p className="text-zinc-500 text-xs">{rec.reason}</p>
