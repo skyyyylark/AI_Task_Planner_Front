@@ -7,6 +7,25 @@ import { aiApi } from '../api/aiApi'
 import type { TaskItemDto, TaskPriority } from '../types'
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd'
 import type { DropResult } from '@hello-pangea/dnd'
+import DeadlineNotifier from '../components/Deadlinenotifier'
+
+const formatDeadline = (deadline: string) => {
+  const date = new Date(deadline)
+
+  const dateStr = date.toLocaleDateString('ru-RU', {
+    day: 'numeric', month: 'long', year: 'numeric',
+    timeZone: 'Asia/Bishkek'
+  })
+
+  const hours = date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Bishkek' })
+  const h = parseInt(date.toLocaleString('ru-RU', { hour: 'numeric', hour12: false, timeZone: 'Asia/Bishkek' }))
+  const m = date.toLocaleString('ru-RU', { minute: 'numeric', timeZone: 'Asia/Bishkek' })
+
+  // Если время 23:59 — показываем только дату
+  if (h === 23 && parseInt(m) === 59) return dateStr
+
+  return `${dateStr}, ${hours}`
+}
 
 const priorityLabel: Record<TaskPriority, string> = {
   Low: 'Низкий',
@@ -116,7 +135,6 @@ export default function BoardPage() {
     },
   })
 
-  // ← ВНУТРИ компонента
   const changeStatusMutation = useMutation({
     mutationFn: ({ taskId, status }: { taskId: string; status: string }) =>
       tasksApi.changeStatus(taskId, status),
@@ -243,9 +261,10 @@ export default function BoardPage() {
           ← Назад
         </button>
         <h1 className="text-xl font-bold">{board?.title ?? '...'}</h1>
+        
         {board?.description && <span className="text-zinc-600 text-sm">{board.description}</span>}
       </header>
-
+<DeadlineNotifier tasks={tasks ?? []} />
       <main className="max-w-6xl mx-auto px-6 py-8">
         <div className="flex flex-wrap items-center gap-3 mb-6">
           <input
@@ -413,7 +432,7 @@ export default function BoardPage() {
                                   </span>
                                   {task.deadline && (
                                     <span className="text-zinc-600 text-xs">
-                                      {new Date(task.deadline).toLocaleDateString('ru-RU')}
+                                      {formatDeadline(task.deadline)}
                                     </span>
                                   )}
                                 </div>
@@ -486,13 +505,11 @@ export default function BoardPage() {
                       )}
                     </div>
                     {taskDetail.deadline && (
-                      <div>
-                        <p className="text-xs text-zinc-500 mb-1">Дедлайн</p>
-                        <p className="text-sm text-zinc-300">
-                          {new Date(taskDetail.deadline).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' })}
-                        </p>
-                      </div>
-                    )}
+                        <div>
+                          <p className="text-xs text-zinc-500 mb-1">Дедлайн</p>
+                          <p className="text-sm text-zinc-300">{formatDeadline(taskDetail.deadline)}</p>
+                        </div>
+                      )}
                     <div className="flex gap-4">
                       <div>
                         <p className="text-xs text-zinc-500 mb-1">Создано</p>

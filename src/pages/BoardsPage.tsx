@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { boardsApi } from '../api/boardsApi'
 import { useAuthStore } from '../store/authStore'
 import type { TaskBoardDto } from '../types'
+import { profileApi } from '../api/profileApi'
 
 export default function BoardsPage() {
   const navigate = useNavigate()
@@ -12,6 +13,17 @@ export default function BoardsPage() {
 
   const [showCreate, setShowCreate] = useState(false)
   const [form, setForm] = useState({ title: '', description: '' })
+  const [showTelegramModal, setShowTelegramModal] = useState(false)
+    const [chatId, setChatId] = useState('')
+  
+    const linkTelegramMutation = useMutation({
+      mutationFn: (chatId: string) => profileApi.linkTelegram(chatId),
+      onSuccess: () => {
+        setShowTelegramModal(false)
+        setChatId('')
+      },
+    })
+
 
   const { data: boards, isLoading } = useQuery({
     queryKey: ['boards'],
@@ -49,12 +61,20 @@ export default function BoardsPage() {
         <h1 className="text-2xl font-black tracking-tighter">
           task<span className="text-indigo-500">planner</span>
         </h1>
-        <button
-          onClick={handleLogout}
-          className="text-zinc-500 hover:text-white text-sm transition-colors"
-        >
-          Выйти
-        </button>
+        <div className="flex items-center gap-4">
+          <button
+            onClick={() => setShowTelegramModal(true)}
+            className="text-zinc-500 hover:text-white text-sm transition-colors"
+          >
+            🔔 Telegram
+          </button>
+          <button
+            onClick={handleLogout}
+            className="text-zinc-500 hover:text-white text-sm transition-colors"
+          >
+            Выйти
+          </button>
+        </div>
       </header>
 
       <main className="max-w-5xl mx-auto px-6 py-10">
@@ -107,6 +127,44 @@ export default function BoardsPage() {
             </form>
           </div>
         )}
+
+{/* Telegram modal */}
+        {showTelegramModal && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 px-4"
+            onClick={() => setShowTelegramModal(false)}>
+            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 w-full max-w-md"
+              onClick={(e) => e.stopPropagation()}>
+              <h2 className="text-lg font-bold text-white mb-2">🔔 Уведомления в Telegram</h2>
+              <p className="text-zinc-500 text-sm mb-4">
+                Напишите боту <span className="text-indigo-400"><a href="https://t.me/ai_task_notifier_bot" target="_blank">@ai_task_notifier_bot</a></span> команду /start,
+                скопируйте ваш Chat ID и вставьте его ниже.
+              </p>
+              <input
+                type="text"
+                placeholder="Например: 123456789"
+                value={chatId}
+                onChange={(e) => setChatId(e.target.value)}
+                className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-2.5 text-white placeholder-zinc-600 focus:outline-none focus:border-indigo-500 transition-colors mb-3"
+              />
+              <div className="flex gap-2">
+                <button
+                  onClick={() => linkTelegramMutation.mutate(chatId)}
+                  disabled={!chatId || linkTelegramMutation.isPending}
+                  className="flex-1 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm font-semibold py-2 rounded-lg transition-colors"
+                >
+                  {linkTelegramMutation.isPending ? 'Сохраняем...' : 'Подключить'}
+                </button>
+                <button
+                  onClick={() => setShowTelegramModal(false)}
+                  className="text-zinc-400 hover:text-white text-sm px-4 py-2 rounded-lg transition-colors"
+                >
+                  Отмена
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
 
         {/* Boards grid */}
         {isLoading ? (
